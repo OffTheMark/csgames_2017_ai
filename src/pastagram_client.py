@@ -14,7 +14,7 @@ class HockeyClient(LineReceiver, object):
     def __init__(self, name, debug):
         self.name = name
         self.debug = debug
-        self.controller = ControllerPolarity()
+        self.controller = ControllerPolarity(15, 15)
         self.indexPlayer = 0
         self.enemyPlayerIndex = 0
         self.time_threshold = 1.75
@@ -46,17 +46,15 @@ class HockeyClient(LineReceiver, object):
             power_up_string = line[line.index('(') + 1:].split(" - ")[0][:-1]
             power_up_array = [int(x) for x in power_up_string.split(", ")]
             self.controller.power_up_position = (power_up_array[0], power_up_array[1])
-        if "did go" in line:
+        if "did go" in line and not self.name in line:
             array_action = line[line.index('did go') + 7:].split(" ")
             opponent_action = array_action[0]
             if array_action[1] != "-":
                 opponent_action += " " + array_action[1]
-            print(opponent_action)
-            print(self.controller.ball)
             self.controller.move(opponent_action)
             print("Opponent moved {}".format(opponent_action))
             print("The ball is at {}".format(self.controller.ball))
-        if "polarity" in line:
+        if "polarity of the goal" in line:
             self.controller.inverse_polarity()
             print("Our goal is at {}".format(self.controller.goal_by_player[self.indexPlayer]))
 
@@ -68,46 +66,59 @@ class HockeyClient(LineReceiver, object):
     def play_game(self):
         ballX, ballY = self.controller.ball
         self.initial_time = time.time()
+        possible_actions = self.controller.get_possible_actions(ballX, ballY)
 
-        if self.controller.get_possible_actions(ballX, ballY):
-            best_value = float("-inf")
-            best_action = None
-            for action in self.controller.get_possible_actions(ballX, ballY):
-                self.elapsed = time.time() - self.initial_time
+        if len(possible_actions) > 0:
+            very_best_action = None
+            very_best_value = float("-inf")
+            for depth in range(2, 5):
+                best_value = float("-inf")
+                best_action = None
+
+                for action in possible_actions:
+                    self.elapsed = time.time() - self.initial_time
+                    if self.elapsed >= self.time_threshold:
+                        break
+                    # Copy board
+                    c = deepcopy(self.controller)
+                    # Apply move to copied board
+                    c.move(action)
+                    new_ball_x, new_ball_y = c.ball
+                    # If there is a bounce, we play again
+                    maximizing_param = False if not c.dots[new_ball_x][new_ball_y]['bounce'] else True
+                    value = self.alphabeta(c, depth, float("-inf"), float("+inf"), maximizing_param)
+                    if value > best_value:
+                        best_value = value
+                        best_action = action
+                if best_value > very_best_value:
+                    very_best_value = best_value
+                    very_best_action = best_action
+
                 if self.elapsed >= self.time_threshold:
                     break
-                # Copy board
-                c = deepcopy(self.controller)
-                # Apply move to copied board
-                c.move(action)
-                new_ball_x, new_ball_y = c.ball
-                # If there is a bounce, we play again
-                maximizing_param = False if not c.dots[new_ball_x][new_ball_y]['bounce'] else True
-                value = self.alphabeta(c, 2, float("-inf"), float("+inf"), maximizing_param)
-                if value > best_value:
-                    best_value = value
-                    best_action = action
 
-            action = best_action if best_action else self.controller.get_possible_actions(ballX, ballY)[0]
+            action = very_best_action if very_best_action else possible_actions[0]
         else:
-            # Whatever
+            # In case things go south, do whatever
             action = Action.from_number(random.randint(0, 7))
 
         self.controller.move(action)
         self.sendLine(action)
+        test = True
 
-    def alphabeta(self, controller, depth, alpha, beta, maximizing_player):
-        ballX, ballY = controller.ball
+    def alphabeta(self, cont, depth, alpha, beta, maximizing_player):
+        ballX, ballY = cont.ball
         self.elapsed = time.time() - self.initial_time
 
-        if depth == 0 or not controller.get_possible_actions(ballX, ballY) or self.elapsed >= self.time_threshold:
-            return self.calculateBoard(controller)
+        if depth == 0 or not cont.get_possible_actions(ballX, ballY) or self.elapsed >= self.time_threshold:
+            return self.calculateBoard(cont)
 
         if maximizing_player:
             value = float("-inf")
-            for action in controller.get_possible_actions(ballX, ballY):
+            possible_actions = cont.get_possible_actions(ballX, ballY)
+            for action in possible_actions:
                 # Copy board
-                c = deepcopy(controller)
+                c = deepcopy(cont)
                 # Apply move to copied board
                 c.move(action)
                 new_ball_x, new_ball_y = c.ball
@@ -120,9 +131,10 @@ class HockeyClient(LineReceiver, object):
             return value
         else:
             value = float("+inf")
-            for action in controller.get_possible_actions(ballX, ballY):
+            possible_actions = cont.get_possible_actions(ballX, ballY)
+            for action in possible_actions:
                 # Apply move
-                c = deepcopy(controller)
+                c = deepcopy(cont)
                 # Apply move to copied board
                 c.move(action)
                 new_ball_x, new_ball_y = c.ball
