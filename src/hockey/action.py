@@ -7,6 +7,10 @@ class Action(object):
     def to_number(action):
         return list(Action.Name.values()).index(action)
 
+    @staticmethod
+    def to_move(action):
+        return Action.move[action]
+
     NORTH = 'north'
     NORTH_EAST = 'north east'
     EAST = 'east'
