@@ -3,7 +3,7 @@ import random
 from twisted.internet import protocol
 from twisted.internet import reactor
 from twisted.protocols.basic import LineReceiver
-from hockey2.controller_polarity import ControllerPolarity
+from hockey2.our_controller_polarity import ControllerPolarity
 from hockey.action import Action
 
 from copy import copy, deepcopy
@@ -97,7 +97,7 @@ class HockeyClient(LineReceiver, object):
                 if self.elapsed >= self.time_threshold:
                     break
 
-            action = very_best_action if very_best_action else possible_actions[0]
+            action = very_best_action if very_best_action else possible_actions[random.randint(0, len(possible_actions) - 1)]
         else:
             # In case things go south, do whatever
             action = Action.from_number(random.randint(0, 7))
