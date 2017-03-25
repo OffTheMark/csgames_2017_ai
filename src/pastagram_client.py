@@ -138,7 +138,7 @@ class HockeyClient(LineReceiver, object):
         else:
             ourTurn = -1
         if len(controller.get_possible_actions(x, y)) == 0:
-            return winScore * ourTurn
+            return winScore * -ourTurn
 
         if y == controller.goal_by_player[self.indexPlayer]:
             return winScore
