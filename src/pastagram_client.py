@@ -151,7 +151,7 @@ class HockeyClient(LineReceiver, object):
 
     def calculateBoard(self, controller, depth=0):
         x, y = controller.ball
-        winScore = 100
+        winScore = 100 - (depth + 1)
         bounceScore = 5
         goalMultiplier = 2
         powerUpMultiplier = 1
