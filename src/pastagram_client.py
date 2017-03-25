@@ -1,4 +1,5 @@
 import random
+import operator
 
 from twisted.internet import protocol
 from twisted.internet import reactor
@@ -112,7 +113,7 @@ class HockeyClient(LineReceiver, object):
         self.elapsed = time.time() - self.initial_time
 
         if depth == 0 or not cont.get_possible_actions(ballX, ballY) or self.elapsed >= self.time_threshold:
-            return self.calculateBoard(cont)
+            return self.calculateBoard(cont, depth)
 
         if maximizing_player:
             value = float("-inf")
@@ -148,9 +149,13 @@ class HockeyClient(LineReceiver, object):
                     break
             return value
 
-    def calculateBoard(self, controller):
+    def calculateBoard(self, controller, depth=0):
         x, y = controller.ball
-        winScore = float("inf")
+        winScore = 100
+        bounceScore = 5
+        goalMultiplier = 2
+        powerUpMultiplier = 1
+        score = 0
         ourTurn = 0
         if controller.active_player_name() == name:
             ourTurn = 1
@@ -161,9 +166,16 @@ class HockeyClient(LineReceiver, object):
 
         if y == controller.goal_by_player[self.indexPlayer]:
             return winScore
+
         if y == controller.goal_by_player[self.enemyPlayerIndex]:
             return winScore * -1
-        return controller.size_y - abs(controller.goal_by_player[self.indexPlayer] - y)
+
+        yDiffFromGoal = abs(controller.goal_by_player[self.indexPlayer] - y)
+        score = (controller.size_y - yDiffFromGoal) * goalMultiplier
+
+        if controller.dots[x][y]['bounce']:
+            score += bounceScore * ourTurn
+        return score
 
 
 class ClientFactory(protocol.ClientFactory):
