@@ -42,6 +42,10 @@ class HockeyClient(LineReceiver, object):
                 goal = "north"
                 self.controller.register("other")
                 self.controller.register(name)
+        if "power up is at" in line:
+            power_up_string = line[line.index('(') + 1:].split(" - ")[0][:-1]
+            power_up_array = [int(x) for x in power_up_string.split(", ")]
+            self.controller.power_up_position = (power_up_array[0], power_up_array[1])
         if "did go" in line:
             array_action = line[line.index('did go') + 7:].split(" ")
             opponent_action = array_action[0]
