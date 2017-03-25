@@ -7,7 +7,7 @@ from hockey.controller import Controller
 from hockey.action import Action
 from hockey.board_printer import BoardPrinter
 
-from copy import deepcopy
+from copy import copy, deepcopy
 import time
 
 
@@ -16,6 +16,8 @@ class HockeyClient(LineReceiver, object):
         self.name = name
         self.debug = debug
         self.controller = Controller()
+        self.indexPlayer = 0
+        self.enemyPlayerIndex = 0
 
     def connectionMade(self):
         self.sendLine(self.name)
@@ -27,13 +29,15 @@ class HockeyClient(LineReceiver, object):
 
     def lineReceived(self, line):
         line = line.decode('UTF-8')
-        playerNumber = 0
         if (line.startswith("Welcome,")):
-            playerNumber = int(line[-2])
-            if playerNumber == 0:
+            self.indexPlayer = int(line[-2])
+            if self.indexPlayer == 0:
+                self.enemyPlayerIndex = 1
                 self.controller.register(name)
                 self.controller.register("other")
             else:
+                self.enemyPlayerIndex = 0
+                goal = "north"
                 self.controller.register("other")
                 self.controller.register(name)
         if "did go" in line:
@@ -58,23 +62,26 @@ class HockeyClient(LineReceiver, object):
         best_value = float("-inf")
         best_action = None
 
-        time_threshold = 1.80
+        time_threshold = 1.75
         initial_time = time.time()
 
-        for action in self.controller.get_possible_actions(ballX, ballY):
-            elapsed = time.time() - initial_time
-            if elapsed >= time_threshold:
-                break
-            # Copy board
-            c = deepcopy(self.controller)
-            # Apply move to copied board
-            c.move(action)
-            value = self.alphabeta(c, 4, float("-inf"), float("+inf"), False)
-            if value > best_value:
-                best_value = value
-                best_action = action
+        if self.controller.get_possible_actions(ballX, ballY):
+            for action in self.controller.get_possible_actions(ballX, ballY):
+                elapsed = time.time() - initial_time
+                if elapsed >= time_threshold:
+                    break
+                # Copy board
+                c = deepcopy(self.controller)
+                # Apply move to copied board
+                c.move(action)
+                value = self.alphabeta(c, 2, float("-inf"), float("+inf"), False)
+                if value > best_value:
+                    best_value = value
+                    best_action = action
 
-        action = best_action if best_action else self.controller.get_possible_actions(ballX, ballY)[0]
+            action = best_action if best_action else self.controller.get_possible_actions(ballX, ballY)[0]
+        else:
+            action = Action.from_number(random.randint(0, 7))
 
         self.controller.move(action)
         self.sendLine(action)
@@ -83,19 +90,20 @@ class HockeyClient(LineReceiver, object):
         ballX, ballY = controller.ball
 
         if depth == 0 or not controller.get_possible_actions(ballX, ballY):
-            # Whatever
-            return random.randint(0, 100)
+            return self.calculateBoard(controller)
 
         if maximizing_player:
             value = float("-inf")
             for action in controller.get_possible_actions(ballX, ballY):
                 # Copy board
                 c = deepcopy(controller)
+                print(str(c is controller))
                 # Apply move to copied board
                 c.move(action)
                 move = Action.to_move(action)
                 new_ball_x = ballX + move[0]
                 new_ball_y = ballY + move[1]
+                # If there's a bounce, the same player plays
                 maximizing_param = False if not c.dots[new_ball_x][new_ball_y]['bounce'] else maximizing_player
                 value = max(value, self.alphabeta(c, depth - 1, alpha, beta, maximizing_param))
                 alpha = max(alpha, value)
@@ -112,6 +120,7 @@ class HockeyClient(LineReceiver, object):
                 move = Action.to_move(action)
                 new_ball_x = ballX + move[0]
                 new_ball_y = ballY + move[1]
+                # If there's a bounce, the same player plays
                 maximizing_param = True if not c.dots[new_ball_x][new_ball_y]['bounce'] else maximizing_player
                 value = min(value, self.alphabeta(c, depth - 1, alpha, beta, maximizing_param))
                 beta = min(beta, value)
@@ -119,6 +128,23 @@ class HockeyClient(LineReceiver, object):
                 if beta <= alpha:
                     break
             return value
+
+    def calculateBoard(self, controller):
+        x, y = controller.ball
+        winScore = float("inf")
+        ourTurn = 0
+        if controller.active_player_name() == name:
+            ourTurn = 1
+        else:
+            ourTurn = -1
+        if len(controller.get_possible_actions(x, y)) == 0:
+            return winScore * ourTurn
+
+        if y == controller.goal_by_player[self.indexPlayer]:
+            return winScore
+        if y == controller.goal_by_player[self.enemyPlayerIndex]:
+            return winScore * -1
+        return controller.size_y - abs(controller.goal_by_player[self.indexPlayer] - y)
 
 
 class ClientFactory(protocol.ClientFactory):
