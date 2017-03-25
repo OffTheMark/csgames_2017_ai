@@ -3,9 +3,8 @@ import random
 from twisted.internet import protocol
 from twisted.internet import reactor
 from twisted.protocols.basic import LineReceiver
-from hockey.controller import Controller
+from hockey2.controller_polarity import ControllerPolarity
 from hockey.action import Action
-from hockey.board_printer import BoardPrinter
 
 from copy import copy, deepcopy
 import time
@@ -15,9 +14,12 @@ class HockeyClient(LineReceiver, object):
     def __init__(self, name, debug):
         self.name = name
         self.debug = debug
-        self.controller = Controller()
+        self.controller = ControllerPolarity()
         self.indexPlayer = 0
         self.enemyPlayerIndex = 0
+        self.time_threshold = 1.75
+        self.initial_time = 0.0
+        self.elapsed = 0.0
 
     def connectionMade(self):
         self.sendLine(self.name)
@@ -29,7 +31,7 @@ class HockeyClient(LineReceiver, object):
 
     def lineReceived(self, line):
         line = line.decode('UTF-8')
-        if (line.startswith("Welcome,")):
+        if line.startswith("Welcome,"):
             self.indexPlayer = int(line[-2])
             if self.indexPlayer == 0:
                 self.enemyPlayerIndex = 1
@@ -41,15 +43,18 @@ class HockeyClient(LineReceiver, object):
                 self.controller.register("other")
                 self.controller.register(name)
         if "did go" in line:
-            boardPrinter = BoardPrinter()
-            arrayMove = line[line.index('did go') + 7:].split(" ")
-            oppenentMove = arrayMove[0]
-            if arrayMove[1] != "-":
-                oppenentMove += " " + arrayMove[1]
-            print(oppenentMove)
+            array_action = line[line.index('did go') + 7:].split(" ")
+            opponent_action = array_action[0]
+            if array_action[1] != "-":
+                opponent_action += " " + array_action[1]
+            print(opponent_action)
             print(self.controller.ball)
-            self.controller.move(oppenentMove)
-            print("THE BALL")
+            self.controller.move(opponent_action)
+            print("Opponent moved {}".format(opponent_action))
+            print("The ball is at {}".format(self.controller.ball))
+        if "polarity" in line:
+            self.controller.inverse_polarity()
+            print("Our goal is at {}".format(self.controller.goal_by_player[self.indexPlayer]))
 
         if self.debug:
             print('Server said:', line)
@@ -58,29 +63,30 @@ class HockeyClient(LineReceiver, object):
 
     def play_game(self):
         ballX, ballY = self.controller.ball
-        # print(self.controller.get_possible_actions(ballX, ballY))
-        best_value = float("-inf")
-        best_action = None
-
-        time_threshold = 1.75
-        initial_time = time.time()
+        self.initial_time = time.time()
 
         if self.controller.get_possible_actions(ballX, ballY):
+            best_value = float("-inf")
+            best_action = None
             for action in self.controller.get_possible_actions(ballX, ballY):
-                elapsed = time.time() - initial_time
-                if elapsed >= time_threshold:
+                self.elapsed = time.time() - self.initial_time
+                if self.elapsed >= self.time_threshold:
                     break
                 # Copy board
                 c = deepcopy(self.controller)
                 # Apply move to copied board
                 c.move(action)
-                value = self.alphabeta(c, 2, float("-inf"), float("+inf"), False)
+                new_ball_x, new_ball_y = c.ball
+                # If there is a bounce, we play again
+                maximizing_param = False if not c.dots[new_ball_x][new_ball_y]['bounce'] else True
+                value = self.alphabeta(c, 2, float("-inf"), float("+inf"), maximizing_param)
                 if value > best_value:
                     best_value = value
                     best_action = action
 
             action = best_action if best_action else self.controller.get_possible_actions(ballX, ballY)[0]
         else:
+            # Whatever
             action = Action.from_number(random.randint(0, 7))
 
         self.controller.move(action)
@@ -88,8 +94,9 @@ class HockeyClient(LineReceiver, object):
 
     def alphabeta(self, controller, depth, alpha, beta, maximizing_player):
         ballX, ballY = controller.ball
+        self.elapsed = time.time() - self.initial_time
 
-        if depth == 0 or not controller.get_possible_actions(ballX, ballY):
+        if depth == 0 or not controller.get_possible_actions(ballX, ballY) or self.elapsed >= self.time_threshold:
             return self.calculateBoard(controller)
 
         if maximizing_player:
@@ -97,12 +104,9 @@ class HockeyClient(LineReceiver, object):
             for action in controller.get_possible_actions(ballX, ballY):
                 # Copy board
                 c = deepcopy(controller)
-                print(str(c is controller))
                 # Apply move to copied board
                 c.move(action)
-                move = Action.to_move(action)
-                new_ball_x = ballX + move[0]
-                new_ball_y = ballY + move[1]
+                new_ball_x, new_ball_y = c.ball
                 # If there's a bounce, the same player plays
                 maximizing_param = False if not c.dots[new_ball_x][new_ball_y]['bounce'] else maximizing_player
                 value = max(value, self.alphabeta(c, depth - 1, alpha, beta, maximizing_param))
@@ -117,9 +121,7 @@ class HockeyClient(LineReceiver, object):
                 c = deepcopy(controller)
                 # Apply move to copied board
                 c.move(action)
-                move = Action.to_move(action)
-                new_ball_x = ballX + move[0]
-                new_ball_y = ballY + move[1]
+                new_ball_x, new_ball_y = c.ball
                 # If there's a bounce, the same player plays
                 maximizing_param = True if not c.dots[new_ball_x][new_ball_y]['bounce'] else maximizing_player
                 value = min(value, self.alphabeta(c, depth - 1, alpha, beta, maximizing_param))
