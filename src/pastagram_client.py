@@ -20,14 +20,13 @@ class HockeyClient(LineReceiver, object):
         self.time_threshold = 1.75
         self.initial_time = 0.0
         self.elapsed = 0.0
+        self.last_depth = 0
 
     def connectionMade(self):
         self.sendLine(self.name)
 
-
     def sendLine(self, line):
         super(HockeyClient, self).sendLine(line.encode('UTF-8'))
-
 
     def lineReceived(self, line):
         line = line.decode('UTF-8')
@@ -46,7 +45,7 @@ class HockeyClient(LineReceiver, object):
             power_up_string = line[line.index('(') + 1:].split(" - ")[0][:-1]
             power_up_array = [int(x) for x in power_up_string.split(", ")]
             self.controller.power_up_position = (power_up_array[0], power_up_array[1])
-        if "did go" in line and not self.name in line:
+        if "did go" in line and self.name not in line:
             array_action = line[line.index('did go') + 7:].split(" ")
             opponent_action = array_action[0]
             if array_action[1] != "-":
@@ -71,7 +70,11 @@ class HockeyClient(LineReceiver, object):
         if len(possible_actions) > 0:
             very_best_action = None
             very_best_value = float("-inf")
-            for depth in range(2, 5):
+            # Optimistic, I admit
+            for depth in range(2, 2000):
+                if self.elapsed >= self.time_threshold:
+                    break
+                self.last_depth = depth
                 best_value = float("-inf")
                 best_action = None
 
@@ -94,17 +97,15 @@ class HockeyClient(LineReceiver, object):
                     very_best_value = best_value
                     very_best_action = best_action
 
-                if self.elapsed >= self.time_threshold:
-                    break
-
-            action = very_best_action if very_best_action else possible_actions[random.randint(0, len(possible_actions) - 1)]
+            action = very_best_action if very_best_action else possible_actions[
+                random.randint(0, len(possible_actions) - 1)]
         else:
             # In case things go south, do whatever
             action = Action.from_number(random.randint(0, 7))
 
         self.controller.move(action)
         self.sendLine(action)
-        test = True
+        print("Last depth : {}".format(self.last_depth + 1))
 
     def alphabeta(self, cont, depth, alpha, beta, maximizing_player):
         ballX, ballY = cont.ball
@@ -173,12 +174,10 @@ class ClientFactory(protocol.ClientFactory):
     def buildProtocol(self, addr):
         return HockeyClient(self.name, self.debug)
 
-
     def clientConnectionFailed(self, connector, reason):
         if self.debug:
             print("Connection failed - goodbye!")
         reactor.stop()
-
 
     def clientConnectionLost(self, connector, reason):
         if self.debug:
